@@ -1,87 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { request } from 'node:http';
 import { once } from 'node:events';
+import { request } from 'node:http';
 import { makeServer } from '../src/server.js';
-import { encodeWav, inspectWav, MAX_WAV_BYTES } from '../public/wav.js';
-
 async function start(t, engine = { state: 'idle', busy: false }) {
-  const server = makeServer(engine);
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  const server = makeServer(engine); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
-  return `http://127.0.0.1:${server.address().port}`;
+  return 'http://127.0.0.1:' + server.address().port;
 }
-const options = (body, headers = {}) => ({ method: 'POST', headers: { 'content-type': 'audio/wav', 'x-hush-local': '1', ...headers }, body });
-
-test('startup serves every browser asset and runtime status', async (t) => {
+const options = (value, headers = {}) => ({ method: 'POST', headers: { 'content-type': 'application/json', 'x-clarity-local': '1', ...headers }, body: JSON.stringify(value) });
+test('serves all frontend assets and blocks microphone access', async (t) => {
   const base = await start(t);
-  for (const [path, type] of [['/', 'text/html'], ['/app.js', 'text/javascript'], ['/audio.js', 'text/javascript'], ['/wav.js', 'text/javascript'], ['/style.css', 'text/css'], ['/icon.svg', 'image/svg+xml']]) {
-    const response = await fetch(base + path);
-    assert.equal(response.status, 200, path);
-    assert.equal(response.headers.get('content-type').split(';')[0], type);
-    assert.ok((await response.text()).length > 0, path);
+  for (const path of ['/', '/app.js', '/style.css', '/icon.svg', '/api/status']) {
+    const res = await fetch(base + path); assert.equal(res.status, 200, path); assert.ok((await res.text()).length);
+    assert.match(res.headers.get('permissions-policy'), /microphone=\(\)/);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
   }
-  const response = await fetch(base + '/api/status');
-  assert.equal((await response.json()).state, 'idle');
-  assert.match(response.headers.get('content-security-policy'), /default-src 'self'/);
-  assert.equal(response.headers.get('access-control-allow-origin'), null);
+  for (const path of ['/audio.js', '/wav.js', '/src/generator.js']) assert.equal((await fetch(base + path)).status, 404);
 });
-
-test('rejects foreign hosts and origins', async (t) => {
+test('rejects foreign origins and hostnames', async (t) => {
   const base = await start(t);
-  const origin = await fetch(base + '/api/status', { headers: { origin: 'https://example.com' } });
-  assert.equal(origin.status, 403);
-  const status = await new Promise((resolve, reject) => {
-    const req = request(base + '/api/status', { headers: { host: 'example.com' } }, (res) => { res.resume(); resolve(res.statusCode); });
+  assert.equal((await fetch(base + '/api/status', { headers: { origin: 'https://example.com' } })).status, 403);
+  const code = await new Promise((resolve, reject) => {
+    const req = request(base, { headers: { host: 'example.com' } }, (res) => { res.resume(); resolve(res.statusCode); });
     req.on('error', reject); req.end();
   });
-  assert.equal(status, 403);
+  assert.equal(code, 403);
 });
-
-test('rejects invalid audio, language, media type, and missing local header', async (t) => {
+test('rejects invalid and oversized input and missing local headers', async (t) => {
   const base = await start(t);
-  const wav = encodeWav(Float32Array.of(0));
-  assert.equal((await fetch(base + '/api/transcribe', options('not wav'))).status, 400);
-  assert.equal((await fetch(base + '/api/transcribe?language=invalid', options(wav))).status, 400);
-  assert.equal((await fetch(base + '/api/transcribe', options(wav, { 'content-type': 'application/json' }))).status, 415);
-  assert.equal((await fetch(base + '/api/transcribe', options(wav, { 'x-hush-local': '' }))).status, 415);
-  assert.equal((await fetch(base + '/src/server.js')).status, 404);
+  for (const value of [null, {}, { text: '' }, { text: 2 }, { text: 'a'.repeat(6001) }, { text: 'a'.repeat(33000) }]) assert.equal((await fetch(base + '/api/organize', options(value))).status, 400);
+  assert.equal((await fetch(base + '/api/organize', options({ text: 'Hello' }, { 'x-clarity-local': '' }))).status, 415);
+  assert.equal((await fetch(base + '/api/organize', options({ text: 'Hello' }, { 'content-type': 'text/plain' }))).status, 415);
 });
-
-test('rejects oversized uploads before invoking transcription', async (t) => {
-  const base = await start(t);
-  const response = await fetch(base + '/api/transcribe', options(new Uint8Array(MAX_WAV_BYTES + 1)));
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /too large/);
-});
-
-test('streams a transcript from validated WAV input and clears server bytes', async (t) => {
-  let received;
-  const base = await start(t, {
-    state: 'idle', busy: false,
-    async transcribe(wav, language, report) {
-      received = wav;
-      assert.equal(inspectWav(wav).seconds, 1);
-      assert.equal(language, 'en');
-      report({ type: 'status', stage: 'transcribing', message: 'Testing' });
-      return { text: 'Test transcript' };
-    },
-  });
-  const response = await fetch(base + '/api/transcribe?language=en', options(encodeWav(new Float32Array(16000).fill(0.2))));
+test('streams engine output across the HTTP boundary', async (t) => {
+  const base = await start(t, { state: 'idle', busy: false, async generate(text, report) {
+    assert.equal(text, 'A real input.'); report({ type: 'delta', text: 'Output' });
+    return { text: 'Output', meta: { runtime: 'test' } };
+  } });
+  const response = await fetch(base + '/api/organize', options({ text: ' A real input. ' }));
   assert.equal(response.status, 200);
   const events = (await response.text()).trim().split('\n').map(JSON.parse);
-  assert.deepEqual(events.map((event) => event.type), ['status', 'done']);
-  assert.equal(events[1].transcript.text, 'Test transcript');
-  assert.ok(received.every((byte) => byte === 0));
+  assert.deepEqual(events.map((e) => e.type), ['delta', 'done']);
+  assert.equal(events[1].result.text, 'Output');
 });
-
-test('returns a busy error and streams engine failures honestly', async (t) => {
-  const engine = { state: 'idle', busy: true, async transcribe() { throw new Error('Model unavailable'); } };
+test('exposes busy and native failures without fabricated results', async (t) => {
+  const engine = { state: 'idle', busy: true, async generate() { throw new Error('Native failure'); } };
   const base = await start(t, engine);
-  const wav = encodeWav(Float32Array.of(0));
-  assert.equal((await fetch(base + '/api/transcribe', options(wav))).status, 409);
+  assert.equal((await fetch(base + '/api/organize', options({ text: 'Notes' }))).status, 409);
   engine.busy = false;
-  const response = await fetch(base + '/api/transcribe', options(wav));
-  assert.deepEqual(JSON.parse((await response.text()).trim()), { type: 'error', message: 'Model unavailable' });
+  const response = await fetch(base + '/api/organize', options({ text: 'Notes' }));
+  assert.deepEqual(JSON.parse((await response.text()).trim()), { type: 'error', message: 'Native failure' });
 });

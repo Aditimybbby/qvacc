@@ -12,3 +12,5 @@ evidence/*.json
 evidence/*.png
 evidence/*.webm
 evidence/*.txt
+
+evidence/output.md

@@ -1,13 +1,10 @@
-import '../src/transcriber.js'; // Set the same QVAC configuration as the server.
-
+import '../src/generator.js';
 try {
   const sdk = await import('@qvac/sdk');
-  for (const name of ['loadModel', 'transcribe', 'cancel', 'unloadModel']) {
-    if (typeof sdk[name] !== 'function') throw new Error(`Missing QVAC function: ${name}`);
+  for (const name of ['loadModel', 'completion', 'cancel', 'unloadModel']) {
+    if (typeof sdk[name] !== 'function') throw new Error('Missing SDK function: ' + name);
   }
-  if (!sdk.WHISPER_TINY) throw new Error('Missing QVAC model constant: WHISPER_TINY');
-  console.log('QVAC exports verified. This check does not run native inference.');
-} catch (error) {
-  console.error(`QVAC check failed: ${error.message}\nRun npm ci and check the QVAC system requirements.`);
-  process.exitCode = 1;
-}
+  if (!sdk.QWEN3_600M_INST_Q4) throw new Error('Missing QWEN3_600M_INST_Q4 model constant.');
+  console.log('QVAC 0.20.0 exports verified: loadModel, completion, cancel, unloadModel.');
+  console.log('This import check does not prove native inference. Run npm run smoke.');
+} catch (error) { console.error(error.message); process.exitCode = 1; }
