@@ -133,17 +133,6 @@ saves `evidence/hush-working.png` **only after actual transcription succeeds**.
 It also saves the returned transcript and runtime metadata. You can take a
 manual screenshot instead. See [evidence/README.md](evidence/README.md).
 
-## Submission
-
-Repository: https://github.com/Aditimybbby/qvacc
-
-App description: Hush turns microphone recordings and imported audio into
-editable transcripts on the user's laptop. It calls QVAC `loadModel` and
-`transcribe` with Whisper Tiny.
-
-After verifying a real run, attach its screenshot and post on X with the repo
-link and `@qvac`. See [SUBMISSION.md](SUBMISSION.md) for the prepared text.
-
 ## License
 
 Hush application code is [MIT licensed](LICENSE). QVAC and downloaded model
