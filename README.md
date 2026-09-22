@@ -17,6 +17,12 @@ npm ci
 npm start
 ```
 
+If startup reports `ERR_MODULE_NOT_FOUND` for `public/wav.js`, your checkout
+is missing application files. The WAV helper is part of this repository,
+not an npm package. Update your checkout with `git pull --ff-only`, then run
+`npm ci` and `npm start` again. Keep the whole `public/` directory: it also
+contains the browser scripts, stylesheet, and icon needed by the interface.
+
 Open **http://127.0.0.1:4173** on that same computer. Click **Start recording**,
 allow microphone access, and stop when finished. Or choose an audio file.
 Select the spoken language and click **Turn it into text**.
@@ -105,19 +111,20 @@ bounded audio input, no CORS grants, and a restrictive content policy.
 ```sh
 npm test             # 15 unit / HTTP-boundary tests; no inference
 npm run check:sdk    # imports the installed SDK and checks real exports
-npm run smoke        # real QVAC inference with samples/hello.wav
+npm run smoke -- "path/to/recording.wav"  # real QVAC inference
 ```
 
-The unit tests cover audio conversion boundaries, malformed inputs,
-concurrent requests, cancellation, retry after download failure, model reuse,
-and localhost protections. Test doubles appear only in the tests. They do
-not establish model accuracy or prove native inference.
+The smoke check requires your own 16 kHz mono PCM16 WAV of up to three
+minutes; no sample recording is bundled. You can save a normalized WAV from
+Hush after transcribing a recording.
 
-**Current validation:** the SDK export check and all 15 tests passed during
-development. Native inference could not be completed in the development
-environment because QVAC's local IPC socket was denied (`listen EPERM`).
-No successful inference result or screenshot is claimed in this repository.
-Run the real smoke check on your machine before submitting the project.
+The 15 unit / HTTP tests cover startup imports, every browser asset, WAV
+encoding and validation, malformed and oversized input, busy requests,
+streamed errors, PCM delivery to QVAC, model reuse, and localhost protections.
+They use test doubles and do not establish model accuracy or prove native
+inference. Run the SDK export check and real smoke check on your machine
+before submitting the project. No successful native inference result is
+claimed by these tests.
 
 ## Capture real output
 
@@ -125,10 +132,10 @@ With `npm start` running in another terminal:
 
 ```sh
 npx playwright install chromium
-npm run capture
+npm run capture -- "path/to/recording.wav"
 ```
 
-This runs the real browser flow with the original bundled recording and
+This runs the real browser flow with your supplied recording and
 saves `evidence/hush-working.png` **only after actual transcription succeeds**.
 It also saves the returned transcript and runtime metadata. You can take a
 manual screenshot instead. See [evidence/README.md](evidence/README.md).
