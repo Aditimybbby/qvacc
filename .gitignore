@@ -1,0 +1,14 @@
+node_modules/
+.qvac/
+models/
+*.bin
+*.gguf
+*.log
+.env
+.env.*
+test-results/
+playwright-report/
+evidence/*.json
+evidence/*.png
+evidence/*.webm
+evidence/*.txt
