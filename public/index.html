@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f7f5f0"><title>Hush — voice notes, kept close.</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/" aria-label="Hush home"><img src="/icon.svg" width="38" height="38" alt=""><span>hush<span class="brand-dot">.</span></span></a><span class="tagline">VOICE NOTES, KEPT CLOSE.</span><span class="private-badge"><span class="dot"></span> AI on your device</span></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">A SMALL SPACE FOR YOUR BIG IDEAS</p><h1>Say it. <em>Keep it.</em></h1><p class="intro-copy">Your train of thought, turned into text.<br>Record a moment. Get a transcript. Keep it all on your laptop.</p></div><div class="handwritten"><svg viewBox="0 0 60 60" aria-hidden="true"><path d="M19 11v26c0 7 12 7 12 0V18c0-4-6-4-6 0v19M39 15v23c0 15-27 15-27 0V15"/></svg><span>For the thoughts<br>you don't want to lose.</span></div></section>
+    <div class="workspace">
+      <section class="capture panel" aria-labelledby="capture-title">
+        <div class="panel-header"><div><span class="step">01 / AUDIO IN</span><h2 id="capture-title">Leave yourself a note.</h2></div><span class="limit-badge">UP TO 3 MIN</span></div>
+        <div class="recorder" id="recorder"><div class="recording-label" id="recording-label">A LITTLE ROOM TO THINK OUT LOUD</div><div class="timer" id="timer" aria-live="off">00:00</div><button id="record" class="record-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></svg><span id="record-label">Start recording</span></button><p id="record-help">Just you, your mic, and a thought.</p></div>
+        <div class="or"><span></span> OR BRING A RECORDING <span></span></div>
+        <button class="dropzone" id="import" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/></svg><span><strong>Choose an audio file</strong><small>or drop it here · WAV, MP3, M4A, WebM*</small></span><span class="upload-plus" aria-hidden="true">+</span></button><input type="file" id="audio-file" accept="audio/*,.wav,.mp3,.m4a,.webm,.ogg,.flac" hidden>
+        <div id="clip" class="clip" hidden><div class="clip-heading"><div><span class="clip-label">READY TO LISTEN</span><h3 id="clip-name"></h3></div><button id="clear" class="icon-button" type="button" aria-label="Remove recording">×</button></div><canvas id="waveform" width="680" height="96" aria-label="Audio waveform"></canvas><audio id="playback" controls preload="metadata"></audio><div class="clip-meta"><span id="clip-duration"></span><span>MONO · 16 KHZ · LOCAL</span></div></div>
+        <div class="options"><label for="language">Spoken language</label><select id="language"><option value="auto">Detect automatically</option><option value="en">English</option><option value="uk">Ukrainian</option><option value="sk">Slovak</option><option value="hi">Hindi</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="ja">Japanese</option></select></div>
+        <button id="transcribe" class="primary-button" type="button" disabled><span>Turn it into text</span><span aria-hidden="true">↗</span></button><button id="cancel" class="text-button cancel" type="button" hidden>Stop transcription</button>
+        <p class="setup-note">First use downloads Whisper Tiny (~78 MB). No AI account or API key.</p><div id="error" class="error" role="alert" hidden></div><p class="codec-note">*Available audio formats depend on your browser.</p>
+      </section>
+      <section class="transcript panel" aria-labelledby="transcript-title">
+        <div class="panel-header"><div><span class="step">02 / WORDS OUT</span><h2 id="transcript-title">The thought, in writing.</h2></div><span id="result-badge" class="result-badge">YOUR SPACE</span></div>
+        <div id="empty" class="empty"><div class="page-art" aria-hidden="true"><div class="paper-shadow"></div><div class="paper"><span class="quotation">“</span><i></i><i></i><i class="short"></i><span class="paper-label">something worth keeping</span></div><span class="spark">✳</span></div><h3>It starts with your voice.</h3><p>A passing idea. A practice run.<br>A reminder for future you.</p><div class="empty-flow"><span>Speak</span><span>→</span><span>Transcribe</span><span>→</span><span>Keep</span></div></div>
+        <div id="working" class="working" role="status" aria-live="polite" hidden><div class="spinner" aria-hidden="true"></div><p class="eyebrow">ONLY ON YOUR DEVICE</p><h3 id="work-title">Getting ready to listen.</h3><p id="work-text">Loading your local model…</p><progress id="progress" max="100" hidden></progress><span id="work-detail"></span></div>
+        <div id="result" class="result" hidden><div class="result-info"><span id="result-name"></span><span id="word-count"></span></div><label class="sr-only" for="transcript-text">Transcript</label><textarea id="transcript-text" spellcheck="true" placeholder="Your transcript appears here."></textarea><div class="edit-note"><span id="edit-state">Original AI transcript · you can edit this</span><span id="elapsed"></span></div><div class="export-actions"><button id="copy" class="secondary-button" type="button">Copy text</button><button id="export" class="secondary-button dark-button" type="button">Save .txt ↓</button><button id="save-audio" class="text-button" type="button">Save audio ↓</button></div><p class="accuracy-note">Check names and details before sharing. A small model can miss words.</p></div>
+        <div class="privacy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><div><strong>Nothing to upload. Nothing to sign into.</strong><p>Audio and transcripts stay in memory until you save them. Reloading clears the session.</p></div></div>
+      </section>
+    </div>
+    <footer><span class="runtime"><span class="dot"></span><span id="runtime">Connecting to the local runtime…</span></span><span>Powered by QVAC <span id="sdk-version">0.20.0</span> <span class="divider">/</span> Built for a little peace of mind.</span></footer>
+  </main>
+</body>
+</html>
