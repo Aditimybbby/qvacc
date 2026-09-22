@@ -1,22 +1,17 @@
 import { readFile } from 'node:fs/promises';
-import { LocalTranscriber } from '../src/transcriber.js';
-
-const path = process.argv[2];
-if (!path) {
-  console.error('Usage: npm run smoke -- path/to/recording.wav\nProvide a 16 kHz mono PCM16 WAV, up to 3 minutes long.');
-  process.exitCode = 1;
-} else {
-  const engine = new LocalTranscriber();
-  let wav;
-  try {
-    wav = await readFile(path);
-    const transcript = await engine.transcribe(wav, 'auto', (event) => console.error(JSON.stringify(event)));
-    console.log(JSON.stringify(transcript, null, 2));
-  } catch (error) {
-    console.error(`Smoke check failed: ${error.message}`);
-    process.exitCode = 1;
-  } finally {
-    wav?.fill(0);
-    await engine.close();
-  }
+import { LocalGenerator } from '../src/generator.js';
+const engine = new LocalGenerator();
+const deadline = setTimeout(() => { console.error('Native inference timed out.'); process.exit(1); }, 600000);
+try {
+  const notes = await readFile(process.argv[2] || new URL('../samples/notes.txt', import.meta.url), 'utf8');
+  const result = await engine.generate(notes, (event) => {
+    if (event.type === 'delta') process.stdout.write(event.text);
+    else console.error(JSON.stringify(event));
+  });
+  if (!result.text.trim()) throw new Error('No model output.');
+  console.log('\n' + JSON.stringify(result.meta, null, 2));
+} catch (error) { console.error(error.message); process.exitCode = 1; }
+finally {
+  await engine.close().catch((error) => { console.error(error.message); process.exitCode = 1; });
+  clearTimeout(deadline);
 }

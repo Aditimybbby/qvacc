@@ -1,146 +1,161 @@
-# Hush
+# Clarity
 
-**Voice notes, kept close.** Record a thought or import an audio file, then
-transcribe it on your own laptop with Tether's QVAC SDK. Edit the result, copy
-it, or save the transcript and recording. No cloud AI provider or API key.
+**Messy notes in. A clear way forward.** Clarity turns pasted notes into a
+summary, key points, and next steps using a small text model on your own
+computer. Edit the result, check off tasks, copy it, or save it as Markdown.
 
-## Run locally
+The application uses **@qvac/sdk 0.20.0**. Its main action calls the real
+`loadModel` and `completion` functions. Generated output comes from QVAC;
+there is no cloud AI API, API key, preset answer, or non-AI replacement.
 
-Use Node.js **22.17 or newer** and npm. Start from a regular desktop terminal
-that permits local sockets and native processes. The SDK contains native
-binaries; leave a few GB of disk space for dependencies and model caching.
+## Install and run
+
+Use Node.js **22.17 or newer** and npm. This is a desktop app with a local
+browser interface. It runs on the computer where you start Node.
 
 ```sh
-git clone https://github.com/Aditimybbby/qvacc.git
+git clone --branch feat/clarity-notes https://github.com/Aditimybbby/qvacc.git
 cd qvacc
 npm ci
 npm start
 ```
 
-If startup reports `ERR_MODULE_NOT_FOUND` for `public/wav.js`, your checkout
-is missing application files. The WAV helper is part of this repository,
-not an npm package. Update your checkout with `git pull --ff-only`, then run
-`npm ci` and `npm start` again. Keep the whole `public/` directory: it also
-contains the browser scripts, stylesheet, and icon needed by the interface.
+Open **http://127.0.0.1:4173** in a browser on that computer. Click **Try
+example notes**, or paste your own notes, then **Organize my notes**.
+Allow the first model download to finish. It is approximately 382 MB;
+later runs reuse the cached model. The SDK's native dependencies also need
+disk space, so leave several GB free.
 
-Open **http://127.0.0.1:4173** on that same computer. Click **Start recording**,
-allow microphone access, and stop when finished. Or choose an audio file.
-Select the spoken language and click **Turn it into text**.
-
-The first transcription downloads the approximately **78 MB Whisper Tiny**
-model. Later uses reuse the cached model. CPU inference is the default. This
-is a desktop local app; it is not a remotely hosted AI service or a native
-phone app.
-
-On Linux, the native SDK may need `libatomic1`. Windows requires the Vulkan
-runtime supported by QVAC even with CPU inference. Consult the current
-[QVAC system requirements](https://docs.qvac.tether.io/system-requirements/)
-if the worker fails to start.
-
-## What it does
-
-- Records up to three minutes from your microphone, with an automatic stop.
-- Imports browser-decodable audio up to 25 MB: WAV, MP3, M4A, WebM and others,
-  depending on browser codec support.
-- Converts audio locally to 16 kHz mono PCM16, displays its waveform, and
-  provides playback before transcription.
-- Offers automatic language detection or a language hint, including English,
-  Ukrainian, Slovak, Hindi, Spanish, French, German, Portuguese and Japanese.
-  Accuracy varies by language, microphone quality and background noise.
-- Shows model-download progress, supports cancelling a request, and displays
-  errors without substituting a preset transcript.
-- Lets you edit, copy, and export the transcript, or save the normalized WAV.
-
-Whisper Tiny is intentionally small. Review names, punctuation and important
-details; noise and silence can produce inaccurate words.
-
-## The actual QVAC integration
-
-The declared, exact dependency is **`@qvac/sdk` 0.20.0**. It satisfies the
-submission's minimum SDK version of 0.19.0. See `package.json` and the lockfile.
-
-`src/transcriber.js` imports the SDK and calls:
-
-1. `loadModel` with `WHISPER_TINY`, `modelType: 'whisper'`, and CPU configuration.
-2. `transcribe` with the loaded model ID and validated in-memory PCM audio.
-3. `cancel` when the request is stopped, and `unloadModel` during cleanup.
-
-These are real exported SDK functions, verified by `npm run check:sdk`.
-The integration follows the
-[official transcription contract](https://docs.qvac.tether.io/ai-capabilities/transcription/).
-The interface and application logic are original; this is not a fork of the
-QVAC examples repository.
-
-The browser decodes and resamples the recording, then sends it over loopback
-HTTP to QVAC's native worker on the same machine. Whisper Tiny processes it
-locally and returns an editable transcript to the browser.
-
-## Privacy and offline use
-
-The server binds only to `127.0.0.1`. Your browser talks to your own computer.
-Hush includes no analytics, external fonts, cloud transcription calls, or
-account system. It does not write recordings or transcripts to a database or
-audio directory. They remain in memory unless you explicitly export them;
-reloading clears the browser session. Model files are cached in `.qvac/`.
-
-Installation and the first model download need internet access. QVAC may use
-its model registry to fetch assets. To use a known local Whisper model and
-avoid asking the model registry for it, set `QVAC_MODEL_PATH` to its absolute
-path before starting Hush. This must be a Whisper-compatible model, not a
-text-generation GGUF.
-
-macOS / Linux:
+For an existing checkout, stop the old server with Ctrl+C and run:
 
 ```sh
-QVAC_MODEL_PATH=/absolute/path/ggml-tiny.bin npm start
-```
-
-PowerShell:
-
-```powershell
-$env:QVAC_MODEL_PATH = 'C:\models\ggml-tiny.bin'
+git fetch origin
+git switch feat/clarity-notes
+git pull --ff-only
+npm ci
 npm start
 ```
 
-Set `PORT` to use a different local port. Do not expose this local app to the
-internet: it is designed for one person's machine, with host/origin checks,
-bounded audio input, no CORS grants, and a restrictive content policy.
+The default model is **Qwen3 0.6B Q4**. CPU execution is requested explicitly.
+No microphone, speaker, camera, or audio file is used.
 
-## Verification
+### Native runtime requirements
 
-```sh
-npm test             # 15 unit / HTTP-boundary tests; no inference
-npm run check:sdk    # imports the installed SDK and checks real exports
-npm run smoke -- "path/to/recording.wav"  # real QVAC inference
+- Linux: install `libatomic1` if missing. A recent desktop distribution is
+  recommended; see the official host requirements for native library details.
+- Windows: QVAC requires a supported **Vulkan runtime, even for CPU inference**.
+  A Windows RDP or virtual machine can lack this runtime. A text interface
+  removes microphone requirements, but does not remove the SDK's native
+  runtime requirements.
+
+Check the [official system requirements](https://docs.qvac.tether.io/system-requirements/)
+if the worker cannot start. An error is shown in the app; it is never
+replaced with a fake summary.
+
+If you previously set `QVAC_MODEL_PATH` to a speech model, clear that setting
+before running Clarity. In Windows Git CMD:
+
+```cmd
+set QVAC_MODEL_PATH=
+npm start
 ```
 
-The smoke check requires your own 16 kHz mono PCM16 WAV of up to three
-minutes; no sample recording is bundled. You can save a normalized WAV from
-Hush after transcribing a recording.
+## What you can do
 
-The 15 unit / HTTP tests cover startup imports, every browser asset, WAV
-encoding and validation, malformed and oversized input, busy requests,
-streamed errors, PCM delivery to QVAC, model reuse, and localhost protections.
-They use test doubles and do not establish model accuracy or prove native
-inference. Run the SDK export check and real smoke check on your machine
-before submitting the project. No successful native inference result is
-claimed by these tests.
+- Paste short notes or import a small UTF-8 `.txt` or `.md` file.
+- Generate a summary, key points, and next steps entirely on this computer.
+- See model download progress and text appear as it is generated.
+- Cancel generation and keep the original notes.
+- Edit the AI draft, check off generated tasks, copy, or export Markdown.
 
-## Capture real output
+Input is limited to 6,000 UTF-8 bytes to fit the small model's context.
+Output is limited to 700 tokens. The app reports when that limit is reached.
+Small models can miss details or invent facts; review names, dates, and tasks.
 
-With `npm start` running in another terminal:
+## QVAC integration
+
+`src/generator.js` dynamically imports the declared SDK and uses:
+
+1. `loadModel` with `QWEN3_600M_INST_Q4`, the
+   `llamacpp-completion` engine, and CPU configuration.
+2. `completion` with the user's notes, consuming `events` and `final`.
+3. `cancel` by request ID and `unloadModel` on shutdown.
+
+The configured plugin is `llamacpp-completion`. The official HTTP source
+is supplied as a checksum-validated fallback for the SDK's catalog model.
+The integration follows the [QVAC text API](https://docs.qvac.tether.io/ai-capabilities/text-generation/)
+and its published SDK declarations. It does not copy an examples app.
+
+All inference runs in the QVAC worker on the same machine as Node.
+The browser only talks to that computer over loopback HTTP.
+
+## Privacy and offline use
+
+The server binds to `127.0.0.1` only. Host and origin checks, bounded
+requests, and a restrictive content policy are included. Microphone and
+camera permissions are disabled. Do not expose this single-user app to the
+public internet.
+
+Notes and generated text remain in application memory unless you export
+them. There is no analytics service, external font, account, or note
+database. Refreshing clears the session. Model files are cached in
+`.qvac/`. KV-cache persistence is disabled for note generation.
+
+Installation and the first model download need internet access. To use an
+existing, compatible text-generation GGUF directly, set `QVAC_MODEL_PATH`:
+
+```powershell
+$env:QVAC_MODEL_PATH = 'C:\\models\\Qwen3-0.6B-Q4_0.gguf'
+npm start
+```
+
+On macOS/Linux:
 
 ```sh
+QVAC_MODEL_PATH=/absolute/path/Qwen3-0.6B-Q4_0.gguf npm start
+```
+
+A speech model is not compatible. Set `PORT` to change the local port.
+
+## Verify and capture actual output
+
+```sh
+npm test
+npm run check:sdk
+npm run smoke
 npx playwright install chromium
-npm run capture -- "path/to/recording.wav"
+npm run capture
 ```
 
-This runs the real browser flow with your supplied recording and
-saves `evidence/hush-working.png` **only after actual transcription succeeds**.
-It also saves the returned transcript and runtime metadata. You can take a
-manual screenshot instead. See [evidence/README.md](evidence/README.md).
+- `npm test` covers validation, model lifecycle, cancellation, retries,
+  streaming, static assets, and localhost protections using test doubles.
+- `check:sdk` imports the actual installed package and checks its exports.
+- `smoke` runs actual local inference on `samples/notes.txt`. To use another
+  text file: `npm run smoke -- path/to/notes.txt`.
+- `capture` starts its own local server, runs the real browser flow, and
+  saves a screenshot only after actual QVAC output passes the sample check.
+
+The capture files are `evidence/clarity-working.png`, `input.txt`,
+`output.md`, and `runtime.json`. Runtime metadata identifies the OS,
+architecture, SDK, model, and elapsed inference time.
+
+The GitHub verification workflow runs unit tests and a separate native
+inference/browser capture job. Its **clarity-real-inference** artifact is
+created only if real inference and screenshot capture succeed. Unit tests
+alone do not prove native inference; inspect the workflow's actual result.
+A Linux CI run does not establish compatibility with every Windows/RDP host.
+
+## Sharing the project
+
+This repository is public and MIT licensed. Keep the three feature commits
+when merging this work so their authorship and history remain visible.
+
+After successful local inference, attach the real screenshot to an X post
+that includes this repository URL and tags **@qvac**. Submit the repository
+URL and the published X post URL. See [SUBMISSION.md](SUBMISSION.md).
+Do not submit a mock screenshot or claim an unverified runtime works.
 
 ## License
 
-Hush application code is [MIT licensed](LICENSE). QVAC and downloaded model
-weights retain their respective licenses. No model weights are bundled here.
+Application code: [MIT](LICENSE). The SDK and model weights retain their
+own licenses. No model weights are bundled in the repository.

@@ -1,0 +1,48 @@
+name: Verify local QVAC app
+on:
+  push:
+    branches: [main, feat/clarity-notes]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: clarity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+  real-inference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install native runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libatomic1 libvulkan1 mesa-vulkan-drivers
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check:sdk
+      - run: npx playwright install --with-deps chromium
+      - name: Run real local inference and capture the UI
+        run: npm run capture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clarity-real-inference
+          path: |
+            evidence/clarity-working.png
+            evidence/input.txt
+            evidence/output.md
+            evidence/runtime.json
+          if-no-files-found: error

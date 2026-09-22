@@ -1,18 +1,16 @@
-# Capture a real transcription
+# Real inference evidence
 
-Start Hush with `npm start`. In another terminal, run:
+Run `npx playwright install chromium`, then `npm run capture`.
+The script starts its own loopback server, loads the installed QVAC SDK,
+generates from the public sample notes, and saves the browser screenshot
+only after actual model output succeeds.
 
-```sh
-npx playwright install chromium
-npm run capture -- "path/to/recording.wav"
-```
+Outputs: `clarity-working.png`, `input.txt`, `output.md`, `runtime.json`.
+These generated files are ignored by Git to avoid accidentally publishing
+private notes. The GitHub verification workflow uploads the public sample
+outputs as an artifact only after success.
 
-Choose a recording with clear speech, no longer than three minutes and no
-larger than 25 MB. The browser converts it to the format QVAC expects.
-The first transcription may download the model. A local model can instead
-be configured with `QVAC_MODEL_PATH` when starting the server.
-
-The capture script saves `hush-working.png`, `transcript.txt`, and
-`runtime.json` here only after a real, nonempty transcript is returned.
-These outputs are ignored by Git because they can contain personal audio
-content. No inference screenshot or transcript is bundled with the project.
+For a public submission, review the screenshot, then deliberately attach
+it to your X post. If committing it here, use
+`git add -f evidence/clarity-working.png`. Do not use unit-test output or
+a fabricated image as proof of local inference.

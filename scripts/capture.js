@@ -1,34 +1,43 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
 import { chromium } from '@playwright/test';
-
-const path = process.argv[2];
-if (!path) {
-  console.error('Usage: npm run capture -- path/to/recording.wav\nStart Hush with npm start in another terminal first.');
-  process.exitCode = 1;
-} else {
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage({ viewport: { width: 1360, height: 1050 } });
-    const base = `http://127.0.0.1:${process.env.PORT || 4173}`;
-    await page.goto(base);
-    const runtime = await (await page.request.get(`${base}/api/status`)).json();
-    await page.locator('#audio-file').setInputFiles(resolve(path));
-    await page.waitForFunction(() => !document.getElementById('transcribe').disabled || !document.getElementById('error').hidden);
-    if (await page.locator('#error').isVisible()) throw new Error(await page.locator('#error').innerText());
-    await page.locator('#transcribe').click();
-    await page.waitForFunction(() => !document.getElementById('result').hidden || !document.getElementById('error').hidden, { }, { timeout: 600000 });
-    if (await page.locator('#error').isVisible()) throw new Error(await page.locator('#error').innerText());
-    const transcript = await page.locator('#transcript-text').inputValue();
-    if (!transcript.trim()) throw new Error('No transcript was returned.');
-    const output = new URL('../evidence/', import.meta.url);
-    await mkdir(output, { recursive: true });
-    await writeFile(new URL('transcript.txt', output), transcript);
-    await writeFile(new URL('runtime.json', output), JSON.stringify(runtime, null, 2));
-    await page.screenshot({ path: fileURLToPath(new URL('hush-working.png', output)), fullPage: true });
-    console.log('Saved actual transcription output in evidence/.');
-  } finally {
-    await browser.close();
-  }
+import { makeServer } from '../src/server.js';
+import { LocalGenerator } from '../src/generator.js';
+const engine = new LocalGenerator();
+const server = makeServer(engine);
+let browser;
+const deadline = setTimeout(() => { console.error('Capture timed out before verified inference.'); process.exit(1); }, 660000);
+try {
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1360, height: 1100 } });
+  const errors = []; page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('http://127.0.0.1:' + server.address().port);
+  await page.locator('#sample').click();
+  const notes = await page.locator('#notes').inputValue();
+  await page.locator('#organize').click();
+  await page.waitForFunction(() => document.getElementById('result').dataset.completed === 'true' || !document.getElementById('error').hidden, {}, { timeout: 600000 });
+  if (await page.locator('#error').isVisible()) throw new Error(await page.locator('#error').innerText());
+  const metadata = JSON.parse(await page.locator('#result').getAttribute('data-metadata'));
+  if (metadata.runtime !== 'local-cpu' || !metadata.functions.includes('completion')) throw new Error('Capture did not use the real QVAC completion path.');
+  await page.locator('#edit').click();
+  const output = await page.locator('#result-edit').inputValue();
+  await page.locator('#edit').click();
+  if (output.trim().length < 40 || !/plant|growth|seed/i.test(output)) throw new Error('Model output did not meaningfully summarize the sample notes.');
+  if (errors.length) throw new Error(errors.join('\n'));
+  const directory = new URL('../evidence/', import.meta.url);
+  await mkdir(directory, { recursive: true });
+  await writeFile(new URL('input.txt', directory), notes);
+  await writeFile(new URL('output.md', directory), output);
+  await writeFile(new URL('runtime.json', directory), JSON.stringify({ ...metadata, platform: process.platform, architecture: process.arch, node: process.version }, null, 2));
+  await page.screenshot({ path: fileURLToPath(new URL('clarity-working.png', directory)), fullPage: true });
+  console.log('Verified real QVAC output and captured evidence/clarity-working.png');
+  console.log(JSON.stringify(metadata));
+} catch (error) { console.error(error.message); process.exitCode = 1; }
+finally {
+  await browser?.close(); server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+  await engine.close().catch((error) => { console.error(error.message); process.exitCode = 1; });
+  clearTimeout(deadline);
 }

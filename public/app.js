@@ -1,255 +1,194 @@
-import { prepareAudio, drawWaveform } from './audio.js';
-import { MAX_SECONDS } from './wav.js';
-
 const $ = (id) => document.getElementById(id);
-let clip = null;
-let clipUrl = null;
-let mode = 'idle';
-let recorder = null;
-let stream = null;
-let recordingTimer;
-let recordingLimit;
-let request = null;
-const clock = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+const EXAMPLE = 'Science project planning\nWe are comparing plant growth under sunlight and a desk lamp. Use six identical pots and the same type of seeds. Keep water and soil amounts equal. Measure plant height every Monday for four weeks.\nMaya will bring the seeds. Leo needs to prepare the measurement table before Friday. I need to find a desk lamp and write the hypothesis. We will compare average plant heights at the end and make a poster.';
+let busy = false;
+let controller = null;
+let output = '';
+let editing = false;
+let completed = false;
+let maxBytes = 6000;
+const byteLength = (text) => new TextEncoder().encode(text.trim()).length;
 
-function showError(message = '') {
+function error(message = '') {
   $('error').textContent = message;
   $('error').hidden = !message;
 }
-
-function setMode(next) {
-  mode = next;
-  const busy = mode !== 'idle';
-  $('record').disabled = busy && mode !== 'recording';
-  for (const id of ['import', 'audio-file', 'clear', 'language']) $(id).disabled = busy;
-  $('transcribe').disabled = busy || !clip;
-  $('cancel').hidden = mode !== 'transcribing';
-  $('record-label').textContent = mode === 'recording' ? 'Stop recording' : 'Start recording';
-  $('recorder').classList.toggle('is-recording', mode === 'recording');
-  $('recording-label').textContent = mode === 'recording' ? 'RECORDING YOUR THOUGHT' : 'A LITTLE ROOM TO THINK OUT LOUD';
+function controls() {
+  const text = $('notes').value.trim();
+  const count = text ? text.split(/\s+/u).length : 0;
+  $('word-count').textContent = count + (count === 1 ? ' word' : ' words');
+  $('notes').disabled = busy;
+  $('organize').disabled = busy || !text || byteLength(text) > maxBytes;
+  $('clear').disabled = busy || (!text && !output);
+  $('sample').disabled = busy || !!text;
+  for (const id of ['import', 'notes-file']) $(id).disabled = busy;
+  $('edit').disabled = busy || !completed;
+  for (const id of ['copy', 'export']) $(id).disabled = busy || !completed || !output.trim();
+  $('cancel').hidden = !busy;
 }
-
-function resetResult() {
+function clearResult() {
+  delete $('result').dataset.completed;
+  delete $('result').dataset.metadata;
+  output = '';
+  completed = false;
+  editing = false;
   $('result').hidden = true;
-  $('working').hidden = true;
+  $('result-content').replaceChildren();
+  $('result-content').hidden = false;
+  $('result-edit').hidden = true;
+  $('result-edit').value = '';
+  $('edit').textContent = 'Edit';
   $('empty').hidden = false;
-  $('transcript-text').value = '';
   $('result-badge').textContent = 'YOUR SPACE';
-  $('progress').hidden = true;
-  $('work-detail').textContent = '';
+  $('result-info').textContent = '';
+  $('edit-state').textContent = 'AI draft · check the details';
 }
-
-function releaseClip() {
-  $('playback').pause();
-  $('playback').removeAttribute('src');
-  $('playback').load();
-  if (clipUrl) URL.revokeObjectURL(clipUrl);
-  clipUrl = null;
-  clip = null;
+function renderOutput() {
+  const fragment = document.createDocumentFragment();
+  let list = null;
+  const lines = output.split('\n');
+  lines.forEach((line, index) => {
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    if (!line.trim()) { list = null; return; }
+    if (heading) {
+      const h = document.createElement('h3'); h.textContent = heading[1]; fragment.append(h); list = null;
+    } else if (task) {
+      const label = document.createElement('label'); label.className = 'task';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = task[1].toLowerCase() === 'x';
+      checkbox.disabled = busy;
+      const span = document.createElement('span'); span.textContent = task[2];
+      checkbox.addEventListener('change', () => {
+        const current = output.split('\n');
+        current[index] = '- [' + (checkbox.checked ? 'x' : ' ') + '] ' + task[2];
+        output = current.join('\n'); $('edit-state').textContent = 'Checklist updated';
+      });
+      label.append(checkbox, span); fragment.append(label); list = null;
+    } else if (bullet) {
+      if (!list) { list = document.createElement('ul'); fragment.append(list); }
+      const li = document.createElement('li'); li.textContent = bullet[1]; list.append(li);
+    } else {
+      const p = document.createElement('p'); p.textContent = line; fragment.append(p); list = null;
+    }
+  });
+  $('result-content').replaceChildren(fragment);
 }
-
-async function importAudio(blob, name, trimToLimit = false) {
-  showError();
-  setMode('preparing');
-  $('record-help').textContent = 'Preparing your audio…';
-  try {
-    const prepared = await prepareAudio(blob, { trimToLimit });
-    releaseClip();
-    clip = { ...prepared, name };
-    clipUrl = URL.createObjectURL(clip.blob);
-    $('playback').src = clipUrl;
-    $('clip-name').textContent = name;
-    $('clip-duration').textContent = clock(clip.seconds);
-    $('timer').textContent = clock(clip.seconds);
-    $('clip').hidden = false;
-    drawWaveform($('waveform'), clip.samples);
-    resetResult();
-  } catch (error) {
-    showError(error.message || 'Could not prepare this recording.');
-  } finally {
-    $('record-help').textContent = 'Just you, your mic, and a thought.';
-    setMode('idle');
-  }
-}
-
-function stopTracks() {
-  clearInterval(recordingTimer);
-  clearTimeout(recordingLimit);
-  stream?.getTracks().forEach((track) => track.stop());
-  stream = null;
-}
-
-$('record').addEventListener('click', async () => {
-  if (mode === 'recording') {
-    setMode('preparing');
-    recorder.stop();
-    return;
-  }
-  if (mode !== 'idle') return;
-  showError();
-  setMode('preparing');
-  try {
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('Recording is unavailable in this browser. You can still import an audio file.');
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream);
-    const chunks = [];
-    let failed = false;
-    recorder.addEventListener('dataavailable', (event) => { if (event.data.size) chunks.push(event.data); });
-    recorder.addEventListener('error', () => {
-      failed = true;
-      stopTracks();
-      setMode('idle');
-      showError('Recording failed. Check your microphone and try again.');
-    });
-    recorder.addEventListener('stop', () => {
-      const type = recorder.mimeType;
-      stopTracks();
-      recorder = null;
-      if (!failed) void importAudio(new Blob(chunks, { type }), 'Voice note', true);
-    }, { once: true });
-    recorder.start(1000);
-    const started = performance.now();
-    $('timer').textContent = '00:00';
-    recordingTimer = setInterval(() => { $('timer').textContent = clock(Math.min(MAX_SECONDS, (performance.now() - started) / 1000)); }, 200);
-    recordingLimit = setTimeout(() => {
-      if (recorder?.state === 'recording') { setMode('preparing'); recorder.stop(); }
-    }, MAX_SECONDS * 1000);
-    setMode('recording');
-  } catch (error) {
-    stopTracks();
-    setMode('idle');
-    showError(error.name === 'NotAllowedError' ? 'Microphone access was denied. Allow it in your browser or choose an audio file.' : error.message);
-  }
+$('notes').addEventListener('input', () => {
+  error(byteLength($('notes').value) > maxBytes ? 'These notes are too long. Try a shorter section.' : '');
+  if (completed) $('result-badge').textContent = 'PREVIOUS RESULT';
+  controls();
 });
-
-$('import').addEventListener('click', () => $('audio-file').click());
-$('audio-file').addEventListener('change', () => {
-  const file = $('audio-file').files[0];
-  $('audio-file').value = '';
-  if (file && mode === 'idle') void importAudio(file, file.name);
+$('sample').addEventListener('click', () => { $('notes').value = EXAMPLE; error(); controls(); $('notes').focus(); });
+$('clear').addEventListener('click', () => { $('notes').value = ''; clearResult(); error(); controls(); $('notes').focus(); });
+$('import').addEventListener('click', () => $('notes-file').click());
+$('notes-file').addEventListener('change', async () => {
+  const file = $('notes-file').files[0]; $('notes-file').value = '';
+  if (!file || busy) return;
+  if (!/\.(txt|md)$/i.test(file.name)) return error('Choose a .txt or .md file.');
+  if (file.size > maxBytes) return error('This file is too long. Paste a shorter section instead.');
+  busy = true; controls();
+  try { $('notes').value = await file.text(); clearResult(); error(); }
+  catch { error('Could not read this file. Try pasting the text.'); }
+  finally { busy = false; controls(); }
 });
-// Prevent a dropped file from navigating away and losing the current note.
-document.addEventListener('dragover', (event) => event.preventDefault());
-document.addEventListener('drop', (event) => event.preventDefault());
-$('import').addEventListener('drop', (event) => {
-  event.preventDefault();
-  const file = event.dataTransfer.files[0];
-  if (file && mode === 'idle') void importAudio(file, file.name);
-});
-$('clear').addEventListener('click', () => {
-  releaseClip();
-  $('clip').hidden = true;
-  $('timer').textContent = '00:00';
-  resetResult();
-  showError();
-  setMode('idle');
-});
-
-async function readEvents(response, onEvent) {
+async function streamEvents(response, onEvent) {
   if (!response.body) throw new Error('The local runtime returned no response.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let pending = '';
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { value, done } = await reader.read();
       pending += decoder.decode(value, { stream: !done });
-      const lines = pending.split('\n');
-      pending = lines.pop();
+      const lines = pending.split('\n'); pending = lines.pop();
       for (const line of lines) if (line.trim()) onEvent(JSON.parse(line));
       if (done) { if (pending.trim()) onEvent(JSON.parse(pending)); break; }
     }
-  } finally {
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
-
-function updateWordCount() {
-  const text = $('transcript-text').value.trim();
-  const count = text ? text.split(/\s+/u).length : 0;
-  $('word-count').textContent = `${count} ${count === 1 ? 'word' : 'words'}`;
-  $('copy').disabled = $('export').disabled = !text;
-}
-
-$('transcribe').addEventListener('click', async () => {
-  if (!clip || mode !== 'idle') return;
-  showError();
-  resetResult();
-  setMode('transcribing');
+$('organize').addEventListener('click', async () => {
+  const notes = $('notes').value.trim();
+  if (busy || !notes || byteLength(notes) > maxBytes) return;
+  error(); clearResult(); busy = true; controls();
   $('empty').hidden = true;
   $('working').hidden = false;
-  $('work-title').textContent = 'Getting ready to listen.';
-  $('work-text').textContent = 'Connecting to your local model…';
-  request = new AbortController();
-  let result;
+  $('work-title').textContent = 'Preparing your local AI.';
+  $('work-message').textContent = 'First use may take a few minutes.';
+  $('progress').hidden = true;
+  $('result-badge').textContent = 'WORKING';
+  controller = new AbortController();
   try {
-    const response = await fetch(`/api/transcribe?language=${encodeURIComponent($('language').value)}`, {
-      method: 'POST', headers: { 'content-type': 'audio/wav', 'x-hush-local': '1' },
-      body: clip.wav, signal: request.signal,
+    const response = await fetch('/api/organize', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-clarity-local': '1' },
+      body: JSON.stringify({ text: notes }), signal: controller.signal,
     });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.error || `The local runtime returned HTTP ${response.status}.`);
+      throw new Error(detail.error || 'The local runtime could not accept this note.');
     }
-    await readEvents(response, (event) => {
-      if (event.type === 'error') throw new Error(event.message || 'Transcription failed.');
+    let finalResult;
+    await streamEvents(response, (event) => {
+      if (event.type === 'error') throw new Error(event.message || 'Local generation failed.');
       if (event.type === 'status') {
-        $('work-title').textContent = event.stage === 'loading' ? 'Preparing your local model.' : 'Turning your thought into text.';
-        $('work-text').textContent = event.message;
-        if (event.stage === 'transcribing') $('progress').hidden = true;
+        $('work-title').textContent = event.stage === 'loading' ? 'Preparing your local AI.' : 'Making sense of your notes.';
+        $('work-message').textContent = event.message;
+        if (event.stage === 'generating') $('progress').hidden = true;
       }
       if (event.type === 'progress' && Number.isFinite(event.percentage)) {
-        const percentage = Math.max(0, Math.min(100, event.percentage));
-        $('progress').hidden = false;
-        $('progress').value = percentage;
-        $('work-detail').textContent = `${Math.round(percentage)}% downloaded`;
+        $('progress').hidden = false; $('progress').value = Math.max(0, Math.min(100, event.percentage));
       }
-      if (event.type === 'done') result = event.transcript;
+      if (event.type === 'delta') {
+        output += event.text;
+        $('result').hidden = false;
+        renderOutput();
+      }
+      if (event.type === 'done') finalResult = event.result;
     });
-    if (!result?.text?.trim()) throw new Error('No transcript was returned. Try a clearer recording.');
-    $('transcript-text').value = result.text;
-    $('result-name').textContent = clip.name;
-    $('edit-state').textContent = 'Original AI transcript · you can edit this';
-    $('elapsed').textContent = Number.isFinite(result.meta?.inferenceSeconds) ? `${result.meta.inferenceSeconds}s on your device` : '';
-    $('result-badge').textContent = 'READY TO KEEP';
+    if (!finalResult?.text?.trim()) throw new Error('The local model returned no result. Try again.');
+    output = finalResult.text;
+    completed = true;
     $('result').hidden = false;
-    updateWordCount();
-  } catch (error) {
-    $('empty').hidden = false;
-    showError(error.name === 'AbortError' ? 'Transcription stopped. Your recording is ready to try again.' : error.message);
+    $('result-badge').textContent = 'READY TO KEEP';
+    $('result-info').textContent = finalResult.meta.model + ' · ' + finalResult.meta.seconds + 's · on device';
+    $('result').dataset.completed = 'true';
+    $('result').dataset.metadata = JSON.stringify(finalResult.meta);
+    if (finalResult.meta.truncated) error('The model reached its output limit. Review the ending or try a shorter note.');
+  } catch (problem) {
+    clearResult();
+    error(problem.name === 'AbortError' ? 'Generation stopped. Your original notes are still here.' : problem.message);
   } finally {
-    request = null;
-    $('working').hidden = true;
-    setMode('idle');
+    busy = false; controller = null; $('working').hidden = true;
+    if (completed) renderOutput();
+    controls();
   }
 });
-$('cancel').addEventListener('click', () => request?.abort());
-$('transcript-text').addEventListener('input', () => { updateWordCount(); $('edit-state').textContent = 'Edited transcript'; });
+$('cancel').addEventListener('click', () => controller?.abort());
+$('edit').addEventListener('click', () => {
+  editing = !editing;
+  if (editing) $('result-edit').value = output;
+  else { output = $('result-edit').value; renderOutput(); }
+  $('result-content').hidden = editing;
+  $('result-edit').hidden = !editing;
+  $('edit').textContent = editing ? 'Done editing' : 'Edit';
+  if (editing) $('result-edit').focus();
+});
+$('result-edit').addEventListener('input', () => { output = $('result-edit').value; $('edit-state').textContent = 'Edited by you'; controls(); });
 $('copy').addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText($('transcript-text').value);
-    $('copy').textContent = 'Copied';
-    setTimeout(() => { $('copy').textContent = 'Copy text'; }, 1500);
-  } catch { showError('Could not access the clipboard. Select the transcript and copy it manually.'); }
+    await navigator.clipboard.writeText(output); $('copy').textContent = 'Copied';
+    setTimeout(() => { $('copy').textContent = 'Copy'; }, 1500);
+  } catch { error('Clipboard access failed. Use Edit to select and copy the text manually.'); }
 });
-function download(blob, extension) {
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  link.href = url;
-  link.download = `${(clip?.name || 'voice-note').replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 80) || 'voice-note'}.${extension}`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-$('export').addEventListener('click', () => download(new Blob([$('transcript-text').value], { type: 'text/plain;charset=utf-8' }), 'txt'));
-$('save-audio').addEventListener('click', () => { if (clip) download(clip.blob, 'wav'); });
-window.addEventListener('pagehide', () => { request?.abort(); stopTracks(); if (clipUrl) URL.revokeObjectURL(clipUrl); });
-
+$('export').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([output + '\n'], { type: 'text/markdown;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'clarity-notes.md';
+  document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+window.addEventListener('pagehide', () => controller?.abort());
 fetch('/api/status').then(async (response) => {
   if (!response.ok) throw new Error('Runtime unavailable');
-  const status = await response.json();
-  $('runtime').textContent = `${status.model} · local CPU · ready`;
-  $('sdk-version').textContent = status.sdkVersion;
-}).catch(() => { $('runtime').textContent = 'Local runtime unavailable. Check that npm start is running.'; });
+  const status = await response.json(); maxBytes = status.maxTextBytes;
+  $('runtime').textContent = 'QVAC ' + status.sdkVersion + ' · ' + status.model + ' · connected';
+  controls();
+}).catch(() => { $('runtime').textContent = 'Start the local runtime with npm start.'; });
+controls();
